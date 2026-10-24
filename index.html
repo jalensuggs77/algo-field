@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Q-1 Gridworld</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Azeret+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one hardware unit. Screen + keys on the left, fader bank + TD readout + scope on the right; field notes below. */
+:root {
+  --body: #d9d9d4;          /* anodized aluminum */
+  --plate: #e8e8e3;         /* top plate */
+  --key: #f3f3ef;
+  --ink: #151515;
+  --mute: #6c6c66;
+  --line: #bebeb7;
+  --tick: #9a9a93;
+  --hi: rgba(255,255,255,.75);
+  --lo: rgba(0,0,0,.12);
+  --shadow: rgba(30,30,25,.35);
+  --led-off: #c9c9c2;
+
+  --screen: #0a0b0b;
+  --screen-ink: #ecece6;
+  --screen-dim: #2d2f2e;
+  --screen-mid: #5e605e;
+  --screen-wall: #3a3c3b;
+  --path: #6f95ff;
+
+  --k-blue: #2b5cff;
+  --k-green: #17b56a;
+  --k-white: #f6f6f2;
+  --k-orange: #ff5419;
+  --k-ink: #151515;
+  --on-light: #151515;
+  --on-dark: #f6f6f2;
+
+  --font-display: "Archivo", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Archivo", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Azeret Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "PingFang SC", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --body: #141514; --plate: #1d1e1d; --key: #282927; --ink: #ecece6; --mute: #8e8e87;
+    --line: #353634; --tick: #5a5b57; --hi: rgba(255,255,255,.06); --lo: rgba(0,0,0,.5);
+    --shadow: rgba(0,0,0,.7); --led-off: #3d3e3b; --screen: #050606; --k-ink: #ecece6;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --body: #141514; --plate: #1d1e1d; --key: #282927; --ink: #ecece6; --mute: #8e8e87;
+  --line: #353634; --tick: #5a5b57; --hi: rgba(255,255,255,.06); --lo: rgba(0,0,0,.5);
+  --shadow: rgba(0,0,0,.7); --led-off: #3d3e3b; --screen: #050606; --k-ink: #ecece6;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--body); color: var(--ink);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1240px; margin: 0 auto; display: grid; gap: 22px;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.lbl {
+  font: 500 .64rem/1.2 var(--font-mono); letter-spacing: .14em;
+  text-transform: uppercase; color: var(--mute);
+}
+
+/* ---------- header ---------- */
+.top { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 28px; align-items: end; }
+.mark {
+  font-family: var(--font-display); font-stretch: 125%; font-weight: 800;
+  font-size: clamp(2.4rem, 6vw, 3.6rem); line-height: .85; letter-spacing: -.03em; margin: 0;
+}
+.mark small { font-size: .3em; font-weight: 500; letter-spacing: .1em; vertical-align: top; margin-left: .4em; font-stretch: 100%; font-family: var(--font-mono); color: var(--mute); }
+.intro { max-width: 68ch; margin: 0; color: var(--ink); font-size: .92rem; }
+.intro .lbl { display: block; margin-bottom: 6px; }
+
+/* ---------- the unit ---------- */
+.unit {
+  position: relative; background: var(--plate); border-radius: 16px;
+  padding: 26px; display: grid; gap: 26px;
+  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
+  box-shadow: inset 0 1px 0 var(--hi), 0 0 0 1px var(--lo), 0 24px 48px -30px var(--shadow);
+}
+.screw { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--body); box-shadow: inset 0 0 0 1px var(--line), inset 0 2px 2px var(--lo); }
+.screw::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4.5px; height: 1px; background: var(--tick); transform: rotate(var(--r, 30deg)); }
+.screw.tl { top: 9px; left: 9px; } .screw.tr { top: 9px; right: 9px; --r: -20deg; }
+.screw.bl { bottom: 9px; left: 9px; --r: 75deg; } .screw.br { bottom: 9px; right: 9px; --r: 10deg; }
+
+.col { display: grid; gap: 18px; align-content: start; min-width: 0; }
+
+.screen {
+  background: var(--screen); border-radius: 9px; padding: 10px 10px 12px;
+  box-shadow: 0 0 0 1px var(--lo), inset 0 0 0 1px rgba(255,255,255,.04);
+}
+.hud {
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  font: 500 .64rem/1.3 var(--font-mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--screen-ink); padding: 2px 4px 9px; min-height: 2.1em;
+}
+.hud span { opacity: .78; font-variant-numeric: tabular-nums; }
+.hud .hot { color: var(--k-orange); opacity: 1; }
+canvas { display: block; width: 100%; }
+#grid { aspect-ratio: 17 / 11; max-width: 100%; height: auto; cursor: crosshair; border-radius: 3px; }
+#grid.painting { touch-action: none; }
+#scope { height: 128px; }
+
+/* ---------- keys ---------- */
+.banks { display: grid; grid-template-columns: repeat(2, minmax(0, auto)); justify-content: space-between; gap: 16px 22px; }
+.bank { display: grid; gap: 8px; align-content: start; }
+.keys { display: flex; flex-wrap: wrap; gap: 7px; }
+.key {
+  appearance: none; border: 0; cursor: pointer; position: relative;
+  background: var(--key); color: var(--ink);
+  font: 500 .62rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase;
+  min-width: 56px; height: 48px; padding: 0 10px; border-radius: 7px;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  box-shadow: inset 0 1px 0 var(--hi), 0 0 0 1px var(--line), 0 2px 0 var(--lo);
+  transition: transform .06s, box-shadow .06s;
+}
+.key::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--led-off); }
+.key[aria-pressed="true"]::before { background: var(--k-orange); box-shadow: 0 0 6px var(--k-orange); }
+.key:active { transform: translateY(1px); box-shadow: inset 0 1px 0 var(--hi), 0 0 0 1px var(--line), 0 1px 0 var(--lo); }
+.key:focus-visible, .seg button:focus-visible { outline: 2px solid var(--k-orange); outline-offset: 2px; }
+.key.orange { background: var(--k-orange); color: var(--on-light); }
+.key.orange::before { background: rgba(0,0,0,.25); }
+.key.orange[aria-pressed="true"]::before { background: var(--on-dark); box-shadow: 0 0 6px var(--on-dark); }
+.key.sm { height: 36px; flex-direction: row; gap: 8px; }
+.key kbd { font: inherit; opacity: .5; }
+.gk { text-transform: none; letter-spacing: 0; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 500 .62rem/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--mute); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; background: var(--sw); }
+.legend i.ln { height: 3px; width: 14px; vertical-align: 2px; }
+.legend i.dot { border-radius: 50%; box-shadow: 0 0 0 1.5px var(--screen); }
+
+/* ---------- mode switch ---------- */
+.mode { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.seg { display: inline-grid; grid-auto-flow: column; padding: 3px; gap: 3px; border-radius: 8px; background: var(--body); box-shadow: inset 0 1px 2px var(--lo), 0 0 0 1px var(--line); }
+.seg button {
+  appearance: none; border: 0; background: transparent; color: var(--mute); cursor: pointer;
+  font: 600 .66rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase;
+  padding: 9px 12px; border-radius: 6px;
+}
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--plate); }
+
+/* ---------- faders ---------- */
+.faders { display: grid; gap: 14px; }
+.fader { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 0; align-items: center; }
+.fader .cap {
+  grid-row: 1 / 3; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--cap); color: var(--cap-ink);
+  display: grid; place-items: center; font: 600 .95rem/1 var(--font-mono);
+  box-shadow: 0 0 0 1px var(--lo), inset 0 -2px 0 rgba(0,0,0,.12);
+}
+.fader label { font: 500 .64rem/1.2 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); min-width: 0; }
+.fader label span { color: var(--mute); letter-spacing: .04em; margin-left: .5em; font-family: var(--font-body); }
+.fader output { font: 600 .8rem/1 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; min-width: 7ch; }
+.fader input { grid-column: 2 / 4; }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 26px; margin: 0; cursor: pointer;
+  background: repeating-linear-gradient(to right, var(--tick) 0 1px, transparent 1px calc(10% - .01px)) 7px 100% / calc(100% - 14px) 5px no-repeat;
+}
+input[type="range"]::-webkit-slider-runnable-track { height: 2px; background: var(--ink); border-radius: 1px; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 24px; margin-top: -11px; border-radius: 3px; border: 0;
+  background: linear-gradient(var(--cap-ink), var(--cap-ink)) center / 1.5px 55% no-repeat, var(--cap);
+  box-shadow: 0 0 0 1px var(--lo), 0 2px 4px var(--shadow);
+}
+input[type="range"]::-moz-range-track { height: 2px; background: var(--ink); border-radius: 1px; }
+input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 24px; border-radius: 3px; border: 0;
+  background: linear-gradient(var(--cap-ink), var(--cap-ink)) center / 1.5px 55% no-repeat, var(--cap);
+  box-shadow: 0 0 0 1px var(--lo), 0 2px 4px var(--shadow);
+}
+input[type="range"]:focus-visible { outline: 2px solid var(--k-orange); outline-offset: 3px; border-radius: 4px; }
+
+/* ---------- TD readout ---------- */
+.td { display: grid; gap: 6px; padding: 14px 14px 12px; border-radius: 9px; background: var(--body); box-shadow: inset 0 1px 2px var(--lo), 0 0 0 1px var(--line); }
+.eq { font: 400 .74rem/1.6 var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.eq b { font-weight: 600; }
+.eq .a { box-shadow: inset 0 -2px 0 var(--k-blue); }
+.eq .g { box-shadow: inset 0 -2px 0 var(--k-green); }
+.eq.meta { color: var(--mute); font-size: .66rem; }
+
+/* ---------- readouts ---------- */
+.readouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.readouts div { background: var(--plate); padding: 9px 10px 8px; display: grid; gap: 4px; min-width: 0; }
+.readouts b { font: 600 1.05rem/1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- notes ---------- */
+.notes { display: grid; gap: 16px; }
+.notes-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 28px; align-items: baseline; }
+.notes h2 { margin: 0; font-family: var(--font-display); font-stretch: 112%; font-weight: 700; font-size: 1.35rem; letter-spacing: -.01em; text-wrap: balance; }
+.notes-head p { margin: 0; color: var(--mute); max-width: 70ch; }
+.cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.card { background: var(--plate); border-radius: 12px; padding: 18px 18px 16px; display: grid; gap: 10px; align-content: start; grid-template-rows: auto auto 1fr auto; box-shadow: 0 0 0 1px var(--lo); min-width: 0; }
+.card h3 { margin: 0; font-family: var(--font-display); font-stretch: 105%; font-weight: 650; font-size: 1.02rem; line-height: 1.3; text-wrap: balance; }
+.card p { margin: 0; font-size: .86rem; color: var(--ink); }
+.card .tag { display: flex; gap: 8px; align-items: center; }
+.card .tag i { width: 9px; height: 9px; border-radius: 50%; background: var(--cap); box-shadow: 0 0 0 1px var(--lo); }
+.card .keys { margin-top: 4px; }
+.foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; color: var(--mute); font-size: .82rem; padding-top: 4px; border-top: 1px solid var(--line); }
+.foot p { margin: 0; max-width: 70ch; }
+.foot .lbl kbd { font: inherit; color: var(--ink); }
+
+@media (max-width: 1080px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 920px) {
+  .unit { grid-template-columns: minmax(0, 1fr); padding: 22px 18px; }
+  .top, .notes-head { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .unit { padding: 20px 12px 22px; border-radius: 12px; gap: 22px; }
+  .banks { grid-template-columns: minmax(0, 1fr); }
+  .cards { grid-template-columns: minmax(0, 1fr); }
+  .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .key { min-width: 50px; padding: 0 8px; flex: 1 1 auto; }
+  .screen { padding: 8px 6px 8px; }
+}
+@media (prefers-reduced-motion: reduce) { .key { transition: none; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="top">
+    <h1 class="mark">Q-1<small>GRIDWORLD</small></h1>
+    <p class="intro">
+      <span class="lbl">Tabular reinforcement learning · 17 × 11 · 4 actions</span>
+      一个 Q-learning 智能体在网格里找出口。每走一步扣一点分，到达绿色出口得 +1，踩进橙色熔岩得 −1 并重开一局。格子的亮度是它估计的价值 V(s) = max Q(s,a)，蓝线是按当前 Q 表贪婪行走的路线。推子拉到哪里，下一步就按新参数学习。
+    </p>
+  </header>
+
+  <section class="unit" aria-label="Q-1 主机">
+    <span class="screw tl"></span><span class="screw tr"></span><span class="screw bl"></span><span class="screw br"></span>
+
+    <div class="col">
+      <div class="screen">
+        <div class="hud" aria-live="off">
+          <span id="hud-algo" class="hot">Q-LEARNING</span>
+          <span id="hud-mid">VIEW · VALUE</span>
+          <span id="hud-ep">EP 0000 · T 000</span>
+        </div>
+        <canvas id="grid" aria-label="网格世界。用下方的工具键选择画笔后，在这里点击或拖动来修改地图。"></canvas>
+      </div>
+
+      <div class="banks">
+        <div class="bank">
+          <div class="lbl">Transport</div>
+          <div class="keys">
+            <button class="key orange" id="k-play" aria-pressed="true">Run</button>
+            <button class="key" id="k-step">Step</button>
+            <button class="key" id="k-ff" title="立即训练 200 局">+200 ep</button>
+            <button class="key" id="k-reset" title="清空 Q 表，保留地图">Clear Q</button>
+            <button class="key" id="k-decay" aria-pressed="false" title="每局结束后 ε × 0.985"><span><span class="gk">ε</span> decay</span></button>
+            <button class="key" id="k-opt" aria-pressed="false" title="清空时把所有 Q 设为 +1，乐观初始化会逼它把每条路都试一遍">Q₀ = +1</button>
+          </div>
+        </div>
+        <div class="bank">
+          <div class="lbl">Map</div>
+          <div class="keys" id="maps">
+            <button class="key" data-map="maze" aria-pressed="true" title="再按一次换一座迷宫">Maze</button>
+            <button class="key" data-map="cliff" aria-pressed="false">Cliff</button>
+            <button class="key" data-map="rooms" aria-pressed="false">Rooms</button>
+            <button class="key" data-map="open" aria-pressed="false">Open</button>
+          </div>
+        </div>
+        <div class="bank">
+          <div class="lbl">Brush</div>
+          <div class="keys" id="tools">
+            <button class="key" data-tool="inspect" aria-pressed="true">Probe</button>
+            <button class="key" data-tool="wall" aria-pressed="false">Wall</button>
+            <button class="key" data-tool="lava" aria-pressed="false">Lava</button>
+            <button class="key" data-tool="goal" aria-pressed="false">Exit</button>
+            <button class="key" data-tool="start" aria-pressed="false">Start</button>
+            <button class="key" data-tool="erase" aria-pressed="false">Erase</button>
+          </div>
+        </div>
+        <div class="bank">
+          <div class="lbl">View</div>
+          <div class="keys" id="views">
+            <button class="key" data-view="value" aria-pressed="true">V(s)</button>
+            <button class="key" data-view="quad" aria-pressed="false">Q ×4</button>
+            <button class="key" data-view="visits" aria-pressed="false">Visits</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="legend" aria-label="图例">
+        <span><i style="--sw: var(--k-green)"></i>V &gt; 0</span>
+        <span><i style="--sw: var(--k-orange); opacity:.55"></i>V &lt; 0</span>
+        <span><i style="--sw: var(--k-orange)"></i>Lava −1</span>
+        <span><i style="--sw: var(--k-green)"></i>Exit +1</span>
+        <span><i style="--sw: var(--screen-wall)"></i>Wall</span>
+        <span><i class="ln" style="--sw: var(--path)"></i>Greedy path</span>
+        <span><i class="dot" style="--sw: var(--screen-ink)"></i>Agent</span>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="mode">
+        <div class="lbl">Algorithm</div>
+        <div class="seg" role="group" aria-label="算法">
+          <button data-algo="q" aria-pressed="true">Q-learning</button>
+          <button data-algo="sarsa" aria-pressed="false">SARSA</button>
+        </div>
+      </div>
+
+      <div class="faders">
+        <div class="fader" style="--cap: var(--k-blue); --cap-ink: var(--on-dark)">
+          <div class="cap">α</div>
+          <label for="f-alpha">Learn rate<span>学习率</span></label>
+          <output id="v-alpha" for="f-alpha">0.50</output>
+          <input type="range" id="f-alpha" min="0.01" max="1" step="0.01" value="0.5">
+        </div>
+        <div class="fader" style="--cap: var(--k-green); --cap-ink: var(--on-light)">
+          <div class="cap">γ</div>
+          <label for="f-gamma">Discount<span>折扣</span></label>
+          <output id="v-gamma" for="f-gamma">0.95</output>
+          <input type="range" id="f-gamma" min="0" max="0.99" step="0.01" value="0.95">
+        </div>
+        <div class="fader" style="--cap: var(--k-white); --cap-ink: var(--on-light)">
+          <div class="cap">ε</div>
+          <label for="f-eps">Explore<span>探索率</span></label>
+          <output id="v-eps" for="f-eps">0.10</output>
+          <input type="range" id="f-eps" min="0" max="1" step="0.01" value="0.1">
+        </div>
+        <div class="fader" style="--cap: var(--k-orange); --cap-ink: var(--on-light)">
+          <div class="cap">~</div>
+          <label for="f-slip">Slip<span>侧滑概率</span></label>
+          <output id="v-slip" for="f-slip">0.00</output>
+          <input type="range" id="f-slip" min="0" max="0.5" step="0.01" value="0">
+        </div>
+        <div class="fader" style="--cap: var(--k-ink); --cap-ink: var(--plate)">
+          <div class="cap">r</div>
+          <label for="f-step">Step reward<span>每步奖励</span></label>
+          <output id="v-step" for="f-step">−0.010</output>
+          <input type="range" id="f-step" min="-0.2" max="0" step="0.005" value="-0.01">
+        </div>
+        <div class="fader" style="--cap: var(--k-ink); --cap-ink: var(--plate)">
+          <div class="cap">»</div>
+          <label for="f-speed">Speed<span>每秒步数</span></label>
+          <output id="v-speed" for="f-speed">600/s</output>
+          <input type="range" id="f-speed" min="0" max="100" step="1" value="62">
+        </div>
+      </div>
+
+      <div class="td" aria-live="off">
+        <div class="lbl">TD update · 最近一步</div>
+        <div class="eq" id="eq-form">δ = r + γ·max Q(s′,·) − Q(s,a)</div>
+        <div class="eq">δ = <b id="eq-r">−0.010</b> + <b class="g" id="eq-g">0.95</b>·<b id="eq-qn">+0.000</b> − <b id="eq-q">+0.000</b> = <b id="eq-d">+0.000</b></div>
+        <div class="eq">Q ← <b id="eq-q2">+0.000</b> + <b class="a" id="eq-a">0.50</b>·<b id="eq-d2">+0.000</b> = <b id="eq-new">+0.000</b></div>
+        <div class="eq meta" id="eq-meta">s = (0,0) · a = → · s′ = (0,0)</div>
+      </div>
+
+      <div class="screen">
+        <div class="hud"><span>Steps per episode · log</span><span id="hud-scope">last 160</span></div>
+        <canvas id="scope" aria-label="学习曲线：每一局的步数，绿色为到达出口，橙色为掉进熔岩，灰色为超时。"></canvas>
+      </div>
+
+      <div class="readouts">
+        <div><span class="lbl">Episode</span><b id="ro-ep">0</b></div>
+        <div><span class="lbl">Steps</span><b id="ro-steps">0</b></div>
+        <div><span class="lbl">Success·50</span><b id="ro-succ">—</b></div>
+        <div><span class="lbl">Path</span><b id="ro-path">—</b></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="notes" aria-labelledby="notes-h">
+    <div class="notes-head">
+      <h2 id="notes-h">四个实验</h2>
+      <p>每张卡片会换一张地图、清空 Q 表并设好推子。载入后等右侧曲线稳定下来，再照卡片里写的去推推子。</p>
+    </div>
+    <div class="cards">
+      <article class="card" style="--cap: var(--k-white)">
+        <div class="tag lbl"><i></i><span>Map · Cliff · <span class="gk">ε</span> 0.10 · Q₀ +1</span></div>
+        <h3>贴着悬崖走，还是绕远路</h3>
+        <p>世界本身没有随机性，随机只来自智能体自己的 ε。Q-learning 学的是完全贪婪时的最优路线，蓝线紧贴熔岩走 18 步，训练中却常常失足。SARSA 把自己的随机动作也算进价值，路线往上绕开一两行，成功率反而更高。</p>
+        <div class="keys"><button class="key sm" data-exp="cliff-q">Load Q</button><button class="key sm" data-exp="cliff-s">Load SARSA</button></div>
+      </article>
+      <article class="card" style="--cap: var(--k-ink)">
+        <div class="tag lbl"><i></i><span>Map · Cliff · <span class="gk">r</span> −0.20 · <span class="gk">γ</span> 0.99</span></div>
+        <h3>每一步都很疼的时候</h3>
+        <p>每步扣 0.20，走到出口要 18 步，一路扣分加起来比熔岩的 −1 还疼，于是它学会第一步就跳进熔岩，Path 读数显示 LAVA。把 r 拉回 −0.05，它又愿意走完全程。或者 r 不动，把 γ 降到 0.70，未来的扣分打了折，加起来最多 −0.67，熔岩就不划算了。</p>
+        <div class="keys"><button class="key sm" data-exp="toll">Load</button></div>
+      </article>
+      <article class="card" style="--cap: var(--k-white)">
+        <div class="tag lbl"><i></i><span>Map · Rooms · <span class="gk">ε</span> 0.60</span></div>
+        <h3>走得乱，也能学对</h3>
+        <p>六成动作是随机的，成功率很低，曲线满是橙点和灰点。蓝线却依然是一条干净的最短路，因为 Q-learning 是离策略方法，学到的价值与自己怎么走无关。切到 SARSA，路线会离熔岩坑远得多。</p>
+        <div class="keys"><button class="key sm" data-exp="explore">Load</button></div>
+      </article>
+      <article class="card" style="--cap: var(--k-orange)">
+        <div class="tag lbl"><i></i><span>Map · Open · slip 0.25</span></div>
+        <h3>有风的世界</h3>
+        <p>每一步有 25% 的概率被吹向侧面，路线会和熔岩柱保持距离。把 α 推到 1.00，每次更新都完全相信最近一次的运气，热力图开始闪，蓝线来回跳。降到 0.10，画面安静下来，代价是学得更慢。</p>
+        <div class="keys"><button class="key sm" data-exp="windy">Load</button></div>
+      </article>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>选一个画笔后在屏幕上点击或拖动，可以画墙、熔岩、出口，或者移动起点。训练中途改地图，智能体会在原来的 Q 表上重新适应。Probe 模式下指向任意格子，屏幕顶部会显示它四个方向的 Q 值。</p>
+    <span class="lbl"><kbd>Space</kbd> run · <kbd>S</kbd> step · <kbd>F</kbd> +200 · <kbd>C</kbd> clear Q</span>
+  </footer>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  // ---------- world ----------
+  const W = 17, H = 11, N = W * H, MAX_T = 400;
+  const EMPTY = 0, WALL = 1, LAVA = 2, GOAL = 3;
+  const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0], ARROW = ['↑', '→', '↓', '←'];
+  const cells = new Uint8Array(N);
+  const Q = new Float32Array(N * 4);
+  const visits = new Uint32Array(N);
+  let start = 0;
+
+  const P = { alpha: 0.5, gamma: 0.95, eps: 0.1, slip: 0, step: -0.01, speed: 600, algo: 'q', decay: false, q0: 0 };
+
+  const ag = { s: 0, a: -1, t: 0, ret: 0, px: 0, py: 0, trail: [] };
+  const last = { s: 0, a: 0, s2: 0, r: 0, q: 0, qn: 0, d: 0, nq: 0 };
+  let hist = [], episodes = 0, totalSteps = 0;
+  let scopeDirty = true, epsDirty = false;
+
+  const rand = Math.random;
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  const idx = (x, y) => y * W + x;
+
+  // ---------- agent ----------
+  function maxQ(s) { const b = s * 4; return Math.max(Q[b], Q[b + 1], Q[b + 2], Q[b + 3]); }
+  function argmax(s) { const b = s * 4; let k = 0; for (let i = 1; i < 4; i++) if (Q[b + i] > Q[b + k]) k = i; return k; }
+  function flat(s) { const b = s * 4; return Q[b] === Q[b + 1] && Q[b] === Q[b + 2] && Q[b] === Q[b + 3]; }
+  function greedy(s) {
+    const b = s * 4; let m = -Infinity, k = 0, n = 0;
+    for (let i = 0; i < 4; i++) {
+      const v = Q[b + i];
+      if (v > m) { m = v; k = i; n = 1; }
+      else if (v === m && rand() * ++n < 1) k = i;
+    }
+    return k;
+  }
+  const choose = s => rand() < P.eps ? (rand() * 4) | 0 : greedy(s);
+  function move(s, a) {
+    const x = s % W + DX[a], y = (s / W | 0) + DY[a];
+    if (x < 0 || y < 0 || x >= W || y >= H) return s;
+    const n = idx(x, y);
+    return cells[n] === WALL ? s : n;
+  }
+  function resetEpisode() {
+    ag.s = start; ag.a = -1; ag.t = 0; ag.ret = 0; ag.trail.length = 0;
+    ag.px = start % W; ag.py = start / W | 0;
+  }
+  function endEpisode(out) {
+    hist.push({ len: ag.t, ret: ag.ret, out });
+    if (hist.length > 600) hist.splice(0, hist.length - 600);
+    episodes++;
+    if (P.decay && P.eps > 0.01) { P.eps = Math.max(0.01, P.eps * 0.985); epsDirty = true; }
+    scopeDirty = true;
+    resetEpisode();
+  }
+  function stepOnce() {
+    const s = ag.s;
+    const a = (P.algo === 'sarsa' && ag.a >= 0) ? ag.a : choose(s);
+    let ex = a;
+    if (P.slip > 0 && rand() < P.slip) ex = (a + (rand() < 0.5 ? 1 : 3)) % 4;
+    const s2 = move(s, ex), c = cells[s2];
+    const term = c === GOAL || c === LAVA;
+    const r = c === GOAL ? 1 : c === LAVA ? -1 : P.step;
+    const qi = s * 4 + a, q = Q[qi];
+    let qn = 0, a2 = -1;
+    if (!term) {
+      if (P.algo === 'sarsa') { a2 = choose(s2); qn = Q[s2 * 4 + a2]; }
+      else qn = maxQ(s2);
+    }
+    const d = r + P.gamma * qn - q;
+    Q[qi] = q + P.alpha * d;
+    last.s = s; last.a = a; last.s2 = s2; last.r = r; last.q = q; last.qn = qn; last.d = d; last.nq = Q[qi];
+    visits[s2]++; ag.ret += r; ag.t++; totalSteps++;
+    ag.trail.push(s2); if (ag.trail.length > 18) ag.trail.shift();
+    if (term) endEpisode(c === GOAL ? 1 : -1);
+    else if (ag.t >= MAX_T) endEpisode(0);
+    else { ag.s = s2; ag.a = a2; }
+  }
+  function runEpisodes(n) {
+    const target = episodes + n; let guard = n * MAX_T + 1;
+    while (episodes < target && guard-- > 0) stepOnce();
+  }
+
+  // ---------- maps ----------
+  let mazeSeed = 7;
+  function reachable() {
+    const seen = new Uint8Array(N), q = [start]; seen[start] = 1;
+    while (q.length) {
+      const s = q.shift();
+      if (cells[s] === GOAL) return true;
+      if (cells[s] === LAVA) continue;
+      for (let a = 0; a < 4; a++) { const n = move(s, a); if (!seen[n]) { seen[n] = 1; q.push(n); } }
+    }
+    return false;
+  }
+  const MAPS = {
+    maze(seed) {
+      const R = mulberry32(seed);
+      cells.fill(WALL);
+      const stack = [[0, 0]]; cells[0] = EMPTY;
+      while (stack.length) {
+        const [x, y] = stack[stack.length - 1];
+        const opts = [];
+        for (let a = 0; a < 4; a++) {
+          const nx = x + DX[a] * 2, ny = y + DY[a] * 2;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && cells[idx(nx, ny)] === WALL) opts.push(a);
+        }
+        if (!opts.length) { stack.pop(); continue; }
+        const a = opts[(R() * opts.length) | 0];
+        cells[idx(x + DX[a], y + DY[a])] = EMPTY; cells[idx(x + DX[a] * 2, y + DY[a] * 2)] = EMPTY;
+        stack.push([x + DX[a] * 2, y + DY[a] * 2]);
+      }
+      // braid: open some walls so there is more than one route
+      for (let k = 0, tries = 0; k < 11 && tries < 500; tries++) {
+        const x = (R() * W) | 0, y = (R() * H) | 0, s = idx(x, y);
+        if (cells[s] !== WALL || (x % 2) === (y % 2)) continue;
+        cells[s] = EMPTY; k++;
+      }
+      start = idx(0, 0); cells[idx(W - 1, H - 1)] = GOAL;
+      // lava traps on corridors, never cutting off the exit
+      for (let k = 0, tries = 0; k < 4 && tries < 400; tries++) {
+        const x = (R() * W) | 0, y = (R() * H) | 0, s = idx(x, y);
+        if (cells[s] !== EMPTY || x + y < 5 || (W - 1 - x) + (H - 1 - y) < 4) continue;
+        cells[s] = LAVA;
+        if (!reachable()) cells[s] = EMPTY; else k++;
+      }
+    },
+    cliff() {
+      cells.fill(EMPTY);
+      for (let x = 1; x < W - 1; x++) cells[idx(x, H - 1)] = LAVA;
+      start = idx(0, H - 1); cells[idx(W - 1, H - 1)] = GOAL;
+    },
+    rooms() {
+      cells.fill(EMPTY);
+      for (let y = 0; y < H; y++) cells[idx(8, y)] = WALL;
+      for (let x = 0; x < W; x++) cells[idx(x, 5)] = WALL;
+      cells[idx(8, 2)] = cells[idx(8, 8)] = cells[idx(3, 5)] = cells[idx(13, 5)] = EMPTY;
+      [[11, 7], [12, 7], [11, 8], [12, 8], [14, 2], [15, 2]].forEach(([x, y]) => cells[idx(x, y)] = LAVA);
+      start = idx(1, 1); cells[idx(15, 9)] = GOAL;
+    },
+    open() {
+      cells.fill(EMPTY);
+      for (let y = 2; y <= 8; y++) cells[idx(8, y)] = LAVA;
+      cells[idx(4, 0)] = cells[idx(4, 1)] = cells[idx(12, 9)] = cells[idx(12, 10)] = WALL;
+      start = idx(1, 5); cells[idx(15, 5)] = GOAL;
+    },
+  };
+  let currentMap = 'maze';
+  function clearLearning() {
+    Q.fill(P.q0); visits.fill(0); hist = []; episodes = 0; totalSteps = 0;
+    Object.assign(last, { s: start, a: 0, s2: start, r: 0, q: 0, qn: 0, d: 0, nq: 0 });
+    resetEpisode(); scopeDirty = true;
+  }
+  function loadMap(name, reroll) {
+    if (name === 'maze' && reroll) mazeSeed = (mazeSeed * 9301 + 49297) % 233280;
+    MAPS[name](mazeSeed); currentMap = name;
+    pressOnly('#maps', 'map', name);
+    clearLearning();
+  }
+
+  // ---------- UI: params ----------
+  const $ = s => document.querySelector(s);
+  const minus = v => (v < 0 ? '−' : '+') + Math.abs(v).toFixed(3);
+  const speedOf = v => Math.round(2 * Math.pow(10, v / 25));
+  const fmtSpeed = s => s >= 10000 ? Math.round(s / 1000) + 'k/s' : s >= 1000 ? (s / 1000).toFixed(1) + 'k/s' : s + '/s';
+  const FADERS = {
+    alpha: { fmt: v => v.toFixed(2) },
+    gamma: { fmt: v => v.toFixed(2) },
+    eps: { fmt: v => v.toFixed(2) },
+    slip: { fmt: v => v.toFixed(2) },
+    step: { fmt: v => v === 0 ? '0.000' : minus(v) },
+    speed: { fmt: v => fmtSpeed(speedOf(v)), map: speedOf, inv: s => Math.round(25 * Math.log10(s / 2)) },
+  };
+  for (const k in FADERS) {
+    const f = FADERS[k]; f.el = $('#f-' + k); f.out = $('#v-' + k);
+    f.el.addEventListener('input', () => {
+      const v = parseFloat(f.el.value);
+      P[k] = f.map ? f.map(v) : v; f.out.textContent = f.fmt(v);
+    });
+    f.el.dispatchEvent(new Event('input'));
+  }
+  function setParam(k, val) {
+    const f = FADERS[k]; P[k] = val;
+    const raw = f.inv ? f.inv(val) : val;
+    f.el.value = raw; f.out.textContent = f.fmt(parseFloat(f.el.value));
+  }
+
+  function pressOnly(group, attr, val) {
+    document.querySelectorAll(group + ' [data-' + attr + ']').forEach(b => b.setAttribute('aria-pressed', String(b.dataset[attr] === val)));
+  }
+  let tool = 'inspect', view = 'value';
+  const gc = $('#grid'), sc = $('#scope');
+  $('#tools').addEventListener('click', e => {
+    const b = e.target.closest('[data-tool]'); if (!b) return;
+    tool = b.dataset.tool; pressOnly('#tools', 'tool', tool);
+    gc.classList.toggle('painting', tool !== 'inspect');
+  });
+  $('#views').addEventListener('click', e => {
+    const b = e.target.closest('[data-view]'); if (!b) return;
+    view = b.dataset.view; pressOnly('#views', 'view', view);
+  });
+  $('#maps').addEventListener('click', e => {
+    const b = e.target.closest('[data-map]'); if (!b) return;
+    loadMap(b.dataset.map, b.dataset.map === currentMap);
+  });
+  function setAlgo(a) {
+    P.algo = a; ag.a = -1;
+    document.querySelectorAll('[data-algo]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.algo === a)));
+    $('#eq-form').textContent = a === 'q' ? 'δ = r + γ·max Q(s′,·) − Q(s,a)' : 'δ = r + γ·Q(s′,a′) − Q(s,a)';
+  }
+  document.querySelectorAll('[data-algo]').forEach(b => b.addEventListener('click', () => setAlgo(b.dataset.algo)));
+
+  let playing = true;
+  const kPlay = $('#k-play');
+  function setPlaying(p) { playing = p; kPlay.setAttribute('aria-pressed', String(p)); kPlay.textContent = p ? 'Run' : 'Paused'; }
+  kPlay.addEventListener('click', () => setPlaying(!playing));
+  $('#k-step').addEventListener('click', () => { setPlaying(false); stepOnce(); });
+  $('#k-ff').addEventListener('click', () => runEpisodes(200));
+  $('#k-reset').addEventListener('click', clearLearning);
+  const kDecay = $('#k-decay');
+  kDecay.addEventListener('click', () => { P.decay = !P.decay; kDecay.setAttribute('aria-pressed', String(P.decay)); });
+  const kOpt = $('#k-opt');
+  function setOptimistic(on) { P.q0 = on ? 1 : 0; kOpt.setAttribute('aria-pressed', String(on)); }
+  kOpt.addEventListener('click', () => { setOptimistic(!P.q0); clearLearning(); });
+
+  const EXPS = {
+    'cliff-q': { map: 'cliff', algo: 'q', alpha: 0.3, gamma: 0.95, eps: 0.1, slip: 0, step: -0.01, speed: 4000, q0: 1 },
+    'cliff-s': { map: 'cliff', algo: 'sarsa', alpha: 0.3, gamma: 0.95, eps: 0.1, slip: 0, step: -0.01, speed: 4000, q0: 1 },
+    toll: { map: 'cliff', algo: 'q', alpha: 0.5, gamma: 0.99, eps: 0.1, slip: 0, step: -0.2, speed: 4000 },
+    explore: { map: 'rooms', algo: 'q', alpha: 0.5, gamma: 0.95, eps: 0.6, slip: 0, step: -0.01, speed: 4000 },
+    windy: { map: 'open', algo: 'q', alpha: 0.5, gamma: 0.95, eps: 0.1, slip: 0.25, step: -0.01, speed: 4000 },
+  };
+  document.querySelectorAll('[data-exp]').forEach(b => b.addEventListener('click', () => {
+    const e = EXPS[b.dataset.exp];
+    P.decay = false; kDecay.setAttribute('aria-pressed', 'false');
+    setAlgo(e.algo); setOptimistic(!!e.q0);
+    ['alpha', 'gamma', 'eps', 'slip', 'step', 'speed'].forEach(k => setParam(k, e[k]));
+    loadMap(e.map, false);
+    setPlaying(true);
+    $('.unit').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  }));
+
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const onButton = e.target instanceof HTMLButtonElement;
+    if (e.code === 'Space' && !onButton) { e.preventDefault(); setPlaying(!playing); }
+    else if (e.key === 's' || e.key === 'S') { setPlaying(false); stepOnce(); }
+    else if (e.key === 'f' || e.key === 'F') runEpisodes(200);
+    else if (e.key === 'c' || e.key === 'C') clearLearning();
+  });
+
+  // ---------- painting ----------
+  let hover = -1, dragging = false;
+  function cellAt(e) {
+    const r = gc.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) / r.width * W), y = Math.floor((e.clientY - r.top) / r.height * H);
+    return x < 0 || y < 0 || x >= W || y >= H ? -1 : idx(x, y);
+  }
+  function paint(s) {
+    if (s < 0) return;
+    if (tool === 'start') {
+      if (cells[s] === WALL) return;
+      cells[s] = EMPTY; start = s; resetEpisode(); return;
+    }
+    if (s === start) return;
+    const next = { wall: WALL, lava: LAVA, goal: GOAL, erase: EMPTY }[tool];
+    if (next === undefined || cells[s] === next) return;
+    cells[s] = next;
+    if (next !== EMPTY) Q.fill(0, s * 4, s * 4 + 4);
+    if (cells[ag.s] !== EMPTY) resetEpisode();
+  }
+  gc.addEventListener('pointerdown', e => {
+    hover = cellAt(e);
+    if (tool === 'inspect') return;
+    dragging = true; gc.setPointerCapture(e.pointerId); paint(hover);
+  });
+  gc.addEventListener('pointermove', e => {
+    hover = cellAt(e);
+    if (dragging && tool !== 'start') paint(hover);
+  });
+  const stopDrag = () => { dragging = false; };
+  gc.addEventListener('pointerup', stopDrag);
+  gc.addEventListener('pointercancel', stopDrag);
+  gc.addEventListener('pointerleave', () => { if (!dragging) hover = -1; });
+
+  // ---------- drawing ----------
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
+    C = { screen: g('--screen'), ink: g('--screen-ink'), dim: g('--screen-dim'), mid: g('--screen-mid'), wall: g('--screen-wall'),
+      pos: g('--k-green'), neg: g('--k-orange'), path: g('--path') };
+    scopeDirty = true;
+  }
+  readColors();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readColors);
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  const gx = gc.getContext('2d'), sx = sc.getContext('2d');
+  let dpr = 1;
+  function fit(cv) {
+    const r = cv.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  }
+  const ro = new ResizeObserver(() => { fit(gc); fit(sc); scopeDirty = true; });
+  ro.observe(gc); ro.observe(sc);
+
+  let pathLen = -1, pathEnd = EMPTY;
+  function greedyPath() {
+    const pts = [start], seen = new Uint8Array(N); seen[start] = 1;
+    let s = start;
+    for (let i = 0; i < N; i++) {
+      if (flat(s)) break;
+      const n = move(s, argmax(s));
+      if (n === s || seen[n]) break;
+      pts.push(n); seen[n] = 1;
+      if (cells[n] !== EMPTY) break;
+      s = n;
+    }
+    return pts;
+  }
+
+  function drawGrid() {
+    const w = gc.width, h = gc.height, cw = w / W, ch = h / H, d = dpr;
+    const pad = Math.max(1, d);
+    gx.globalAlpha = 1; gx.setLineDash([]);
+    gx.fillStyle = C.screen; gx.fillRect(0, 0, w, h);
+
+    let vmax = 0.05, nmax = 1;
+    for (let s = 0; s < N; s++) if (cells[s] === EMPTY) {
+      const v = Math.abs(maxQ(s)); if (v > vmax) vmax = v;
+      if (visits[s] > nmax) nmax = visits[s];
+    }
+    const lnmax = Math.log1p(nmax);
+
+    for (let s = 0; s < N; s++) {
+      const x0 = (s % W) * cw, y0 = (s / W | 0) * ch, c = cells[s];
+      if (c === WALL) {
+        gx.globalAlpha = 1; gx.fillStyle = C.wall;
+        gx.fillRect(x0 + pad, y0 + pad, cw - 2 * pad, ch - 2 * pad);
+        continue;
+      }
+      if (c === LAVA) {
+        gx.globalAlpha = 1; gx.fillStyle = C.neg;
+        gx.fillRect(x0 + pad, y0 + pad, cw - 2 * pad, ch - 2 * pad);
+        gx.save(); gx.beginPath(); gx.rect(x0 + pad, y0 + pad, cw - 2 * pad, ch - 2 * pad); gx.clip();
+        gx.strokeStyle = C.screen; gx.globalAlpha = 0.35; gx.lineWidth = 1.5 * d; gx.beginPath();
+        for (let k = -ch; k < cw; k += cw / 3.5) { gx.moveTo(x0 + k, y0 + ch); gx.lineTo(x0 + k + ch, y0); }
+        gx.stroke(); gx.restore();
+        continue;
+      }
+      if (c === GOAL) {
+        gx.globalAlpha = 1; gx.fillStyle = C.pos;
+        gx.fillRect(x0 + pad, y0 + pad, cw - 2 * pad, ch - 2 * pad);
+        gx.fillStyle = C.screen; gx.font = `600 ${Math.round(ch * 0.34)}px "Azeret Mono", monospace`;
+        gx.textAlign = 'center'; gx.textBaseline = 'middle'; gx.fillText('+1', x0 + cw / 2, y0 + ch / 2 + d);
+        continue;
+      }
+      if (view === 'value') {
+        const v = maxQ(s);
+        if (v !== 0) {
+          gx.globalAlpha = Math.min(1, Math.sqrt(Math.abs(v) / vmax)) * (v > 0 ? 0.88 : 0.6);
+          gx.fillStyle = v > 0 ? C.pos : C.neg;
+          gx.fillRect(x0 + pad, y0 + pad, cw - 2 * pad, ch - 2 * pad);
+        }
+      } else if (view === 'quad') {
+        const cx = x0 + cw / 2, cy = y0 + ch / 2, i = pad * 1.5;
+        const corners = [[x0 + i, y0 + i], [x0 + cw - i, y0 + i], [x0 + cw - i, y0 + ch - i], [x0 + i, y0 + ch - i]];
+        for (let a = 0; a < 4; a++) {
+          const v = Q[s * 4 + a]; if (v === 0) continue;
+          const p1 = corners[a], p2 = corners[(a + 1) % 4];
+          gx.globalAlpha = Math.min(1, Math.sqrt(Math.abs(v) / vmax)) * (v > 0 ? 0.9 : 0.65);
+          gx.fillStyle = v > 0 ? C.pos : C.neg;
+          gx.beginPath(); gx.moveTo(p1[0], p1[1]); gx.lineTo(p2[0], p2[1]); gx.lineTo(cx, cy); gx.closePath(); gx.fill();
+        }
+      } else if (visits[s]) {
+        gx.globalAlpha = 0.08 + 0.72 * Math.log1p(visits[s]) / lnmax;
+        gx.fillStyle = C.ink; gx.fillRect(x0 + pad, y0 + pad, cw - 2 * pad, ch - 2 * pad);
+      }
+    }
+
+    // dot grid at intersections
+    gx.globalAlpha = 1; gx.fillStyle = C.mid;
+    for (let i = 1; i < W; i++) for (let j = 1; j < H; j++) gx.fillRect(i * cw - d / 2, j * ch - d / 2, d, d);
+
+    // policy arrows
+    if (view !== 'quad') {
+      const L = Math.min(cw, ch) * 0.15;
+      gx.strokeStyle = view === 'visits' ? C.screen : C.ink; gx.globalAlpha = 0.4; gx.lineWidth = 1.1 * d; gx.lineCap = 'round';
+      gx.beginPath();
+      for (let s = 0; s < N; s++) {
+        if (cells[s] !== EMPTY || flat(s)) continue;
+        const a = argmax(s), cx = (s % W + 0.5) * cw, cy = ((s / W | 0) + 0.5) * ch, ux = DX[a], uy = DY[a];
+        const tx = cx + ux * L, ty = cy + uy * L;
+        gx.moveTo(cx - ux * L, cy - uy * L); gx.lineTo(tx, ty);
+        gx.moveTo(tx - ux * L * 0.55 - uy * L * 0.5, ty - uy * L * 0.55 + ux * L * 0.5); gx.lineTo(tx, ty);
+        gx.lineTo(tx - ux * L * 0.55 + uy * L * 0.5, ty - uy * L * 0.55 - ux * L * 0.5);
+      }
+      gx.stroke();
+    }
+
+    // start marker
+    {
+      const x0 = (start % W) * cw, y0 = (start / W | 0) * ch, i = 3 * d;
+      gx.globalAlpha = 0.9; gx.strokeStyle = C.ink; gx.lineWidth = 1.2 * d; gx.setLineDash([3 * d, 2.5 * d]);
+      gx.strokeRect(x0 + i, y0 + i, cw - 2 * i, ch - 2 * i); gx.setLineDash([]);
+      gx.fillStyle = C.ink; gx.globalAlpha = 0.7; gx.font = `600 ${Math.round(ch * 0.22)}px "Azeret Mono", monospace`;
+      gx.textAlign = 'left'; gx.textBaseline = 'top'; gx.fillText('S', x0 + i + 2 * d, y0 + i + 2 * d);
+    }
+
+    // greedy path
+    const pts = greedyPath();
+    pathEnd = cells[pts[pts.length - 1]];
+    pathLen = pathEnd === GOAL ? pts.length - 1 : -1;
+    if (pts.length > 1) {
+      gx.globalAlpha = pathLen > 0 ? 0.95 : 0.5; gx.strokeStyle = C.path; gx.lineWidth = 2.6 * d; gx.lineJoin = 'round';
+      if (pathLen < 0) gx.setLineDash([4 * d, 4 * d]);
+      gx.beginPath();
+      pts.forEach((s, k) => { const x = (s % W + 0.5) * cw, y = ((s / W | 0) + 0.5) * ch; k ? gx.lineTo(x, y) : gx.moveTo(x, y); });
+      gx.stroke(); gx.setLineDash([]);
+    }
+
+    // agent + trail
+    const tx = ag.s % W, ty = ag.s / W | 0;
+    if (P.speed < 60 && Math.abs(ag.px - tx) + Math.abs(ag.py - ty) < 1.5) { ag.px += (tx - ag.px) * 0.35; ag.py += (ty - ag.py) * 0.35; }
+    else { ag.px = tx; ag.py = ty; }
+    const rr = Math.min(cw, ch);
+    if (P.speed <= 400) {
+      gx.fillStyle = C.ink;
+      ag.trail.forEach((s, k) => {
+        gx.globalAlpha = 0.05 + 0.3 * k / ag.trail.length;
+        const q = rr * 0.16; gx.fillRect((s % W + 0.5) * cw - q / 2, ((s / W | 0) + 0.5) * ch - q / 2, q, q);
+      });
+    }
+    gx.globalAlpha = 1; gx.fillStyle = C.ink; gx.strokeStyle = C.screen; gx.lineWidth = 2 * d;
+    gx.beginPath(); gx.arc((ag.px + 0.5) * cw, (ag.py + 0.5) * ch, rr * 0.24, 0, Math.PI * 2); gx.fill(); gx.stroke();
+
+    // hover
+    if (hover >= 0) {
+      gx.globalAlpha = 0.9; gx.strokeStyle = tool === 'inspect' ? C.ink : C.neg; gx.lineWidth = 1.5 * d;
+      gx.strokeRect((hover % W) * cw + d, (hover / W | 0) * ch + d, cw - 2 * d, ch - 2 * d);
+    }
+    gx.globalAlpha = 1;
+  }
+
+  function drawScope() {
+    const w = sc.width, h = sc.height, d = dpr;
+    sx.globalAlpha = 1; sx.fillStyle = C.screen; sx.fillRect(0, 0, w, h);
+    const padL = 30 * d, padR = 6 * d, padT = 6 * d, tapeH = 6 * d, padB = tapeH + 10 * d;
+    const iw = w - padL - padR, ih = h - padT - padB, lmax = Math.log(MAX_T);
+    const ly = v => padT + (1 - Math.log(Math.max(1, v)) / lmax) * ih;
+    sx.font = `500 ${9 * d}px "Azeret Mono", monospace`; sx.textAlign = 'right'; sx.textBaseline = 'middle';
+    for (const t of [1, 10, 100, MAX_T]) {
+      const y = Math.round(ly(t));
+      sx.fillStyle = C.dim; sx.fillRect(padL, y, iw, d);
+      sx.fillStyle = C.mid; sx.fillText(String(t), padL - 6 * d, y);
+    }
+    const K = 160, from = Math.max(0, hist.length - K), n = hist.length - from, dx = iw / (K - 1);
+    if (!n) {
+      sx.fillStyle = C.mid; sx.textAlign = 'center'; sx.fillText('NO EPISODES YET', padL + iw / 2, padT + ih / 2);
+      return;
+    }
+    const col = o => o === 1 ? C.pos : o === -1 ? C.neg : C.mid;
+    for (let i = 0; i < n; i++) {
+      const e = hist[from + i], x = padL + i * dx, y = ly(e.len);
+      sx.fillStyle = col(e.out); sx.globalAlpha = 0.85;
+      sx.fillRect(x - 1.5 * d, y - 1.5 * d, 3 * d, 3 * d);
+      sx.globalAlpha = 1; sx.fillRect(x - dx / 2, h - tapeH - 2 * d, Math.max(d, dx - d), tapeH);
+    }
+    // moving geometric mean of episode length
+    const win = 15;
+    sx.strokeStyle = C.ink; sx.lineWidth = 1.5 * d; sx.lineJoin = 'round'; sx.globalAlpha = 0.95; sx.beginPath();
+    let acc = 0;
+    for (let i = 0; i < hist.length; i++) {
+      acc += Math.log(Math.max(1, hist[i].len));
+      if (i >= win) acc -= Math.log(Math.max(1, hist[i - win].len));
+      if (i < from) continue;
+      const m = Math.exp(acc / Math.min(win, i + 1)), x = padL + (i - from) * dx, y = ly(m);
+      i === from ? sx.moveTo(x, y) : sx.lineTo(x, y);
+    }
+    sx.stroke(); sx.globalAlpha = 1;
+  }
+
+  // ---------- readouts ----------
+  const el = id => document.getElementById(id);
+  const R = { ep: el('ro-ep'), steps: el('ro-steps'), succ: el('ro-succ'), path: el('ro-path'),
+    algo: el('hud-algo'), mid: el('hud-mid'), hep: el('hud-ep'),
+    r: el('eq-r'), g: el('eq-g'), qn: el('eq-qn'), q: el('eq-q'), d: el('eq-d'), q2: el('eq-q2'), a: el('eq-a'), d2: el('eq-d2'), nq: el('eq-new'), meta: el('eq-meta') };
+  const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : String(n);
+  const xy = s => `(${s % W},${s / W | 0})`;
+  const VIEW_NAME = { value: 'VIEW · V(s)', quad: 'VIEW · Q ×4', visits: 'VIEW · VISITS' };
+  function updateUI() {
+    R.ep.textContent = String(episodes);
+    R.steps.textContent = fmtK(totalSteps);
+    const recent = hist.slice(-50);
+    R.succ.textContent = recent.length ? Math.round(100 * recent.filter(e => e.out === 1).length / recent.length) + '%' : '—';
+    R.path.textContent = pathLen > 0 ? pathLen + ' st' : pathEnd === LAVA ? 'LAVA' : '—';
+    R.algo.textContent = (P.algo === 'q' ? 'Q-LEARNING' : 'SARSA') + (playing ? '' : ' · PAUSED');
+    R.hep.textContent = `EP ${String(episodes).padStart(4, '0')} · T ${String(ag.t).padStart(3, '0')}`;
+    if (hover >= 0) {
+      const c = cells[hover];
+      R.mid.textContent = c === WALL ? `CELL ${xy(hover)} · WALL` : c === LAVA ? `CELL ${xy(hover)} · LAVA −1` : c === GOAL ? `CELL ${xy(hover)} · EXIT +1`
+        : `${xy(hover)} ` + [0, 1, 2, 3].map(a => ARROW[a] + minus(Q[hover * 4 + a])).join(' ');
+    } else R.mid.textContent = VIEW_NAME[view];
+    R.r.textContent = minus(last.r); R.g.textContent = P.gamma.toFixed(2); R.qn.textContent = minus(last.qn);
+    R.q.textContent = minus(last.q); R.d.textContent = minus(last.d); R.q2.textContent = minus(last.q);
+    R.a.textContent = P.alpha.toFixed(2); R.d2.textContent = minus(last.d); R.nq.textContent = minus(last.nq);
+    R.meta.textContent = `s = ${xy(last.s)} · a = ${ARROW[last.a]} · s′ = ${xy(last.s2)}`;
+    if (epsDirty) { epsDirty = false; FADERS.eps.el.value = P.eps; FADERS.eps.out.textContent = P.eps.toFixed(2); }
+  }
+
+  // ---------- loop ----------
+  let acc = 0, lastT = performance.now(), uiT = 0;
+  function frame(t) {
+    const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
+    if (playing) {
+      acc += P.speed * dt;
+      const n = Math.min(Math.floor(acc), 40000); acc -= Math.floor(acc);
+      for (let i = 0; i < n; i++) stepOnce();
+    }
+    drawGrid();
+    if (t - uiT > 90) { uiT = t; if (scopeDirty) { scopeDirty = false; drawScope(); } updateUI(); }
+    requestAnimationFrame(frame);
+  }
+
+  // boot: a few warm-up episodes so the first frame already shows values spreading from the exit
+  loadMap('maze', false);
+  runEpisodes(40);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) setPlaying(false);
+  fit(gc); fit(sc);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
